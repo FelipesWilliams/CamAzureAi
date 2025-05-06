@@ -5,10 +5,66 @@ import json
 import io
 import time
 import os
+import math
 from dotenv import load_dotenv
 
 # Cargar variables de entorno
 load_dotenv()
+
+class LoadingButton(tk.Canvas):
+    def __init__(self, parent, command, **kwargs):
+        super().__init__(parent, **kwargs)
+        self.command = command
+        self.is_loading = False
+        
+        # Dimensiones del botón
+        self.width = 200
+        self.height = 40
+        self.configure(width=self.width, height=self.height, bg='black', highlightthickness=0)
+        
+        # Crear el botón base
+        self.create_rectangle(0, 0, self.width, self.height, fill='#1a1a1a', outline='#00ff00', width=2, tags='button')
+        self.create_text(self.width/2, self.height/2, text="Capturar y Analizar", fill='#00ff00', 
+                        font=('Arial', 12, 'bold'), tags='text')
+        
+        # Eventos del botón
+        self.bind('<Enter>', self.on_enter)
+        self.bind('<Leave>', self.on_leave)
+        self.bind('<Button-1>', self.on_click)
+                       
+    def on_enter(self, event):
+        if not self.is_loading:
+            self.itemconfig('button', fill='#2a2a2a')
+            
+    def on_leave(self, event):
+        if not self.is_loading:
+            self.itemconfig('button', fill='#1a1a1a')
+            
+    def on_click(self, event):
+        if not self.is_loading:
+            self.start_loading()
+            self.command()
+            
+    def start_loading(self):
+        self.is_loading = True
+        self.itemconfig('button', fill='#1a1a1a')
+        self.itemconfig('button', outline='#ff0000')  # Cambiar borde a rojo
+        self.itemconfig('text', fill='#ff0000')  # Cambiar texto a rojo
+        self.dots_count = 0
+        self.update_loading_text()
+        
+    def update_loading_text(self):
+        if self.is_loading:
+            dots = "." * (self.dots_count % 4)
+            self.itemconfig('text', text=f"Analizando{dots}")
+            self.dots_count += 1
+            self.after(500, self.update_loading_text)
+            
+    def stop_loading(self):
+        self.is_loading = False
+        self.itemconfig('button', outline='#00ff00')  # Restaurar borde a verde
+        self.itemconfig('text', fill='#00ff00')  # Restaurar texto a verde
+        self.itemconfig('text', text="Capturar y Analizar")
 
 class VisionApp:
     def __init__(self, root):
@@ -27,16 +83,29 @@ class VisionApp:
         if not self.endpoint or not self.api_key:
             raise ValueError("Por favor configura las variables de entorno AZURE_VISION_ENDPOINT y AZURE_VISION_KEY")
 
+        # Inicializar los componentes de la interfaz
+        self.setup_ui()
+        
+        # Configurar el arrastre de la ventana
+        self.setup_window_drag()
+        
+        # Variable para controlar el estado de análisis
+        self.is_analyzing = False
+        
+        # Hacer visible la ventana después de configurar todo
+        self.root.after(100, lambda: self.root.attributes('-alpha', 1.0))
+
+    def setup_ui(self):
         # Crear el panel izquierdo (área de captura)
-        self.left_panel = tk.Frame(root, bg='white')
+        self.left_panel = tk.Frame(self.root, bg='white')
         self.left_panel.place(x=0, y=0, relwidth=0.7, relheight=1.0)
         
-        # Crear el borde verde
+        # Crear el borde verde que ocupa todo el panel izquierdo
         self.border = tk.Canvas(self.left_panel, bg='white', highlightthickness=5, highlightbackground='#00ff00')
-        self.border.place(x=20, y=20, relwidth=0.95, relheight=0.95)
+        self.border.place(x=0, y=0, relwidth=1.0, relheight=1.0)
         
         # Panel derecho para resultados y controles
-        self.right_panel = tk.Frame(root, bg='black')
+        self.right_panel = tk.Frame(self.root, bg='black')
         self.right_panel.place(relx=0.7, y=0, relwidth=0.3, relheight=1.0)
         
         # Título del panel
@@ -47,16 +116,11 @@ class VisionApp:
                                   font=('Arial', 14, 'bold'))
         self.title_label.pack(pady=10)
         
-        # Botón de captura
-        self.capture_btn = tk.Button(self.right_panel, 
-                                   text="Capturar y Analizar",
-                                   command=self.capture_and_analyze,
-                                   bg='#404040',
-                                   fg='white',
-                                   font=('Arial', 10),
-                                   relief='raised',
-                                   padx=10)
-        self.capture_btn.pack(pady=10)
+        # Reemplazar el botón normal por el LoadingButton
+        self.capture_btn = LoadingButton(self.right_panel, 
+                                       command=self.capture_and_analyze,
+                                       bg='black')
+        self.capture_btn.pack(pady=20)
         
         # Área de resultados
         self.result_text = tk.Text(self.right_panel, 
@@ -80,39 +144,46 @@ class VisionApp:
         
         # Mostrar capacidades de la API
         self.show_api_capabilities()
-        
-        # Configurar eventos de movimiento y redimensionamiento
-        self.border.bind("<ButtonPress-1>", self.start_move)
-        self.border.bind("<B1-Motion>", self.on_move)
-        self.border.bind("<ButtonPress-3>", self.start_resize)
-        self.border.bind("<B3-Motion>", self.on_resize)
-        
-        # Hacer visible la ventana después de configurar todo
-        self.root.after(100, lambda: self.root.attributes('-alpha', 1.0))
-        
-    def start_move(self, event):
-        self.x = event.x
-        self.y = event.y
-        
-    def on_move(self, event):
-        deltax = event.x - self.x
-        deltay = event.y - self.y
-        x = self.border.winfo_x() + deltax
-        y = self.border.winfo_y() + deltay
-        self.border.place(x=x, y=y)
-        
-    def start_resize(self, event):
-        self.x = event.x
-        self.y = event.y
-        
-    def on_resize(self, event):
-        width = self.border.winfo_width() + (event.x - self.x)
-        height = self.border.winfo_height() + (event.y - self.y)
-        if width > 100 and height > 100:
-            self.border.place(width=width, height=height)
-            
+
+    def setup_window_drag(self):
+        def start_move(event):
+            if self.is_analyzing:  # No permitir movimiento durante el análisis
+                return
+            widget = event.widget
+            if widget == self.right_panel or widget.master == self.right_panel:
+                return
+            self.x = event.x_root - self.root.winfo_x()
+            self.y = event.y_root - self.root.winfo_y()
+
+        def stop_move(event):
+            if not self.is_analyzing:  # Solo procesar si no está analizando
+                self.x = None
+                self.y = None
+
+        def do_move(event):
+            if self.is_analyzing:  # No permitir movimiento durante el análisis
+                return
+            if hasattr(self, 'x') and self.x is not None:
+                new_x = event.x_root - self.x
+                new_y = event.y_root - self.y
+                self.root.geometry(f"+{new_x}+{new_y}")
+
+        # Vincular eventos
+        for widget in [self.root, self.left_panel, self.border]:
+            widget.bind("<Button-1>", start_move)
+            widget.bind("<ButtonRelease-1>", stop_move)
+            widget.bind("<B1-Motion>", do_move)
+
     def capture_and_analyze(self):
         try:
+            self.is_analyzing = True  # Activar estado de análisis
+            
+            # Cambiar el color del borde a rojo
+            self.border.configure(highlightbackground='#ff0000')
+            
+            # Cambiar el título a rojo
+            self.title_label.configure(fg='#ff0000')
+            
             # Ocultar temporalmente la ventana para la captura
             self.root.attributes('-alpha', 0.0)
             self.root.update()
@@ -136,6 +207,13 @@ class VisionApp:
         except Exception as e:
             self.show_error(f"Error al capturar la imagen: {str(e)}")
             self.root.attributes('-alpha', 1.0)
+            self.restore_colors()
+            self.capture_btn.stop_loading()
+
+    def restore_colors(self):
+        self.is_analyzing = False  # Desactivar estado de análisis
+        self.border.configure(highlightbackground='#00ff00')  # Restaurar borde a verde
+        self.title_label.configure(fg='#00ff00')  # Restaurar título a verde
 
     def show_api_capabilities(self):
         capabilities = """CAPACIDADES DE AZURE COMPUTER VISION:
@@ -211,6 +289,9 @@ Presiona 'Capturar y Analizar' para comenzar."""
             self.show_error(f"Error en el análisis: {str(e)}")
 
     def show_results(self, analysis):
+        self.restore_colors()  # Restaurar colores después del análisis
+        self.capture_btn.stop_loading()
+        
         self.result_text.delete(1.0, tk.END)
         self.result_text.insert(tk.END, "RESULTADOS DEL ANÁLISIS:\n\n", 'title')
         
@@ -231,6 +312,8 @@ Presiona 'Capturar y Analizar' para comenzar."""
                 self.result_text.insert(tk.END, f"({obj['confidence']:.2f})\n")
 
     def show_error(self, message):
+        self.restore_colors()  # Restaurar colores en caso de error
+        self.capture_btn.stop_loading()
         self.result_text.delete(1.0, tk.END)
         self.result_text.insert(tk.END, "ERROR: ", 'error')
         self.result_text.insert(tk.END, message)
